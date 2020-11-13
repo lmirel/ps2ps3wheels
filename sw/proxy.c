@@ -259,38 +259,35 @@ static s_report_dfPs2 whl_ps2_df_report =
 
 #define WHL_PS2_DF_REPORT_LEN  8
 //--
-
+/*
+whl left-right
+|            -- -- -- -- -- -- -- xx xx -- --
+#i.WHL@0004: 06 09 81 08 00 00 7e 14 20 ff ff
+*/
 typedef struct __attribute__((packed))
 {
   unsigned char endpoint;
   unsigned char hatAndButtons;
-  unsigned char buttons;
-  unsigned char buttons2;
-  unsigned short buttonsAndWheel; // 16bit = wheel axis
+  unsigned char buttons;  //start, select, l1, l2, l3, r1, r2, r3
+  unsigned char buttons2; //red/dial:button, left, right, plus, minus
+  unsigned char buttons3; //MSB(B0)PS button
+  unsigned short wheel;   // 16bit = wheel axis + LSB(B7) GT button
   unsigned char gasPedal;
   unsigned char brakePedal;
-  unsigned char clutchPedal;
-  unsigned char shifter_x;
-  unsigned char shifter_y;
-  unsigned char shifter_b;
 } s_report_dfgtPs3;
-
+//
 static s_report_dfgtPs3 whl_ps3_dfgt_report =
 {
   .endpoint = 0x81,
   .hatAndButtons = 0x08,
   .buttons = 0x00,
   .buttons2 = 0x00,
-  .buttonsAndWheel = CENTER_AXIS_VALUE_14BITS<<2, // 14bit wheel|L4|L5
+  .buttons3 = 0x7e,
+  .wheel = CENTER_AXIS_VALUE_14BITS, // 16bit wheel
   .gasPedal = MAX_AXIS_VALUE_8BITS,
   .brakePedal = MAX_AXIS_VALUE_8BITS,
-  .clutchPedal = MAX_AXIS_VALUE_8BITS,
-  .shifter_x = 0x80,
-  .shifter_y = 0x80,
-  .shifter_b = 0x9C,
 };
-
-#define WHL_PS3_DFGT_REPORT_LEN  12
+#define WHL_PS3_DFGT_REPORT_LEN  9
 //--
 #define G27_CROSS_MASK      0x10
 #define G27_SQUARE_MASK     0x20
@@ -401,7 +398,7 @@ proc_list spoof_handlers[] = {
     //PS2:Logitech Driving Force
     {0x046D, 0xC294, whl_ps2_df_convert, ffb_ps2_df_convert, (char *)&whl_ps2_df_report, 0x03, "PS2:Logitech Driving Force",},
     //PS3:Logitech Driving Force GT
-    {0x046D, 0xC29A, whl_ps3_dfgt_convert, ffb_ps3_dfgt_convert, (char *)&whl_ps3_dfgt_report, 0x03, "PS3:Logitech Driving Force GT - bad",},
+    {0x046D, 0xC29A, whl_ps3_dfgt_convert, ffb_ps3_dfgt_convert, (char *)&whl_ps3_dfgt_report, 0x03, "PS3:Logitech Driving Force GT",},
     //PS3:Logitech G27
     {0x046D, 0xC29B, whl_ps3_g27_convert, ffb_ps3_g27_convert, (char *)&whl_ps3_g27_report, 0x03, "PS3:Logitech G27",},
     {0x0000, 0x0000, NULL, NULL, NULL, 0x00, NULL},
@@ -943,9 +940,150 @@ int ffb_ps2_df_convert (unsigned char *ffbin, unsigned char *ffbot, int inlen)
 }
 
 //--PS3: Logitech DFGT/G25
+/*
+whl btn gt
+|            -- -- -- -- -- -- -- -- x- -- --
+#i.WHL@0080: 06 09 81 08 00 80 7e 30 a0 ff ff
+#i.WHL@0180: 06 09 81 08 00 00 7e 30 20 ff ff
+whl left-right
+|            -- -- -- -- -- -- -- xx xx -- --
+#i.WHL@0004: 06 09 81 08 00 00 7e 14 20 ff ff
+#i.WHL@0006: 06 09 81 08 00 00 7e 12 20 ff ff
+#i.WHL@0004: 06 09 81 08 00 00 7e 10 20 ff ff
+whl accel
+|            -- -- -- -- -- -- -- -- -- xx --
+#i.WHL@0001: 06 09 81 08 00 00 7e 09 20 ee ff
+#i.WHL@0003: 06 09 81 08 00 00 7e 09 20 f0 ff
+#i.WHL@0001: 06 09 81 08 00 00 7e 09 20 f5 ff
+#i.WHL@0003: 06 09 81 08 00 00 7e 09 20 f8 ff
+#i.WHL@0001: 06 09 81 08 00 00 7e 09 20 ff ff
+whl brake
+|            -- -- -- -- -- -- -- -- -- -- xx
+#i.WHL@0001: 06 09 81 08 00 00 7e 09 20 ff e0
+#i.WHL@0003: 06 09 81 08 00 00 7e 09 20 ff e9
+#i.WHL@0001: 06 09 81 08 00 00 7e 09 20 ff f4
+#i.WHL@0003: 06 09 81 08 00 00 7e 09 20 ff f7
+#i.WHL@0001: 06 09 81 08 00 00 7e 09 20 ff ff
+whl btn up
+|            -- -- -- -x -- -- -- -- -- -- --
+#i.WHL@0001: 06 09 81 00 00 00 7e 0e 20 ff ff
+#i.WHL@0245: 06 09 81 08 00 00 7e 0b 20 ff ff
+whl btn dn
+|            -- -- -- -x -- -- -- -- -- -- --
+#i.WHL@0844: 06 09 81 04 00 00 7e 0b 20 ff ff
+#i.WHL@0090: 06 09 81 08 00 00 7e 0e 20 ff ff
+whl btn left
+|            -- -- -- -x -- -- -- -- -- -- --
+#i.WHL@0306: 06 09 81 06 00 00 7e 0e 20 ff ff
+#i.WHL@0068: 06 09 81 08 00 00 7e 0b 20 ff ff
+whl btn right
+|            -- -- -- -x -- -- -- -- -- -- --
+#i.WHL@0524: 06 09 81 02 00 00 7e 0b 20 ff ff
+#i.WHL@0068: 06 09 81 08 00 00 7e 0b 20 ff ff
+whl btn cross
+|            -- -- -- x- -- -- -- -- -- -- --
+#i.WHL@0462: 06 09 81 18 00 00 7e 0e 20 ff ff
+#i.WHL@0110: 06 09 81 08 00 00 7e 0e 20 ff ff
+whl btn square
+|            -- -- -- x- -- -- -- -- -- -- --
+#i.WHL@0310: 06 09 81 28 00 00 7e 0e 20 ff ff
+#i.WHL@0092: 06 09 81 08 00 00 7e 0e 20 ff ff
+whl btn triangle
+|            -- -- -- x- -- -- -- -- -- -- --
+#i.WHL@0446: 06 09 81 88 00 00 7e 0e 20 ff ff
+#i.WHL@0098: 06 09 81 08 00 00 7e 0e 20 ff ff
+whl btn circle
+|            -- -- -- x- -- -- -- -- -- -- --
+#i.WHL@0414: 06 09 81 48 00 00 7e 0e 20 ff ff
+#i.WHL@0120: 06 09 81 08 00 00 7e 0e 20 ff ff
+whl btn start
+|            -- -- -- -- x- -- -- -- -- -- --
+#i.WHL@0358: 06 09 81 08 20 00 7e 0b 20 ff ff
+#i.WHL@0118: 06 09 81 08 00 00 7e 0b 20 ff ff
+whl btn select
+|            -- -- -- -- x- -- -- -- -- -- --
+#i.WHL@3128: 06 09 81 08 10 00 7e 0b 20 ff ff
+#i.WHL@0142: 06 09 81 08 00 00 7e 0b 20 ff ff
+whl btn r1
+|            -- -- -- -- -x -- -- -- -- -- --
+#i.WHL@0884: 06 09 81 08 01 00 7e 1c 20 ff ff
+#i.WHL@0071: 06 09 81 08 00 00 7e 1c 20 ff ff
+whl btn r2
+|            -- -- -- -- -x -- -- -- -- -- --
+#i.WHL@0028: 06 09 81 08 04 00 7e 18 20 ff ff
+#i.WHL@0091: 06 09 81 08 00 00 7e 18 20 ff ff
+whl btn r3
+|            -- -- -- -- x- -- -- -- -- -- --
+#i.WHL@0656: 06 09 81 08 40 00 7e 18 20 ff ff
+#i.WHL@0138: 06 09 81 08 00 00 7e 18 20 ff ff
+whl btn l1
+|            -- -- -- -- -x -- -- -- -- -- --
+#i.WHL@0042: 06 09 81 08 02 00 7e 0e 20 ff ff
+#i.WHL@0080: 06 09 81 08 00 00 7e 0e 20 ff ff
+whl btn l2
+|            -- -- -- -- -x -- -- -- -- -- --
+#i.WHL@0500: 06 09 81 08 08 00 7e 0e 20 ff ff
+#i.WHL@0136: 06 09 81 08 00 00 7e 0e 20 ff ff
+whl btn l3
+|            -- -- -- -- x- -- -- -- -- -- --
+#i.WHL@0496: 06 09 81 08 80 00 7e 0e 20 ff ff
+#i.WHL@0088: 06 09 81 08 00 00 7e 0e 20 ff ff
+whl btn PS
+|            -- -- -- -- -- -- -x -- -- -- --
+#i.WHL@0752: 06 09 81 08 00 00 7f 0b 20 ff ff
+#i.WHL@0162: 06 09 81 08 00 00 7e 0b 20 ff ff
+whl btn red/dial push
+|            -- -- -- -- -- -x -- -- -- -- --
+#i.WHL@0490: 06 09 81 08 00 04 7e 0e 20 ff ff
+#i.WHL@0138: 06 09 81 08 00 00 7e 0e 20 ff ff
+whl btn red/dial left
+|            -- -- -- -- -- x- -- -- -- -- --
+#i.WHL@0044: 06 09 81 08 00 20 7e 0b 20 ff ff
+#i.WHL@0004: 06 09 81 08 00 00 7e 0b 20 ff ff
+whl btn red/dial right
+|            -- -- -- -- -- x- -- -- -- -- --
+#i.WHL@0044: 06 09 81 08 00 10 7e 0b 20 ff ff
+#i.WHL@0004: 06 09 81 08 00 00 7e 0b 20 ff ff
+whl btn plus
+|            -- -- -- -- -- -x -- -- -- -- --
+#i.WHL@0465: 06 09 81 08 00 08 7e 01 20 ff ff
+#i.WHL@0183: 06 09 81 08 00 00 7e 01 20 ff ff
+whl btn minus
+|            -- -- -- -- -- x- -- -- -- -- --
+#i.WHL@0652: 06 09 81 08 00 40 7e 01 20 ff ff
+#i.WHL@0203: 06 09 81 08 00 00 7e 01 20 ff ff--
+whl left-right
+|            -- -- -- -- -- -- -- xx xx -- --
+#i.WHL@0004: 06 09 81 08 00 00 7e 14 20 ff ff
+--
+typedef struct __attribute__((packed))
+{
+  unsigned char endpoint;
+  unsigned char hatAndButtons;
+  unsigned char buttons;  //start, select, l1, l2, l3, r1, r2, r3
+  unsigned char buttons2; //red/dial:button, left, right, plus, minus
+  unsigned char buttons3; //MSB(B0)PS button
+  unsigned short wheel;   // 14bit = wheel axis + LSB(B7) GT button
+  unsigned char gasPedal;
+  unsigned char brakePedal;
+} s_report_dfgtPs3;
+--
+static s_report_dfgtPs3 whl_ps3_dfgt_report =
+{
+  .endpoint = 0x81,
+  .hatAndButtons = 0x08,
+  .buttons = 0x00,
+  .buttons2 = 0x00,
+  .buttons3 = 0x7e,
+  .wheel = CENTER_AXIS_VALUE_14BITS, // 16bit wheel
+  .gasPedal = MAX_AXIS_VALUE_8BITS,
+  .brakePedal = MAX_AXIS_VALUE_8BITS,
+};
+
+*/
 int whl_ps3_dfgt_convert (char *rep, int rl)
 {
-  if (1)
+  if (0)
   {
     printf ("\n#whl in %d bytes: ", rl);
     for (int i = 0; i < rl; i++)
@@ -992,16 +1130,19 @@ int whl_ps3_dfgt_convert (char *rep, int rl)
   if (rep[G29_LB_IDX] & G29_OPTIONS_MASK)
     whl_ps3_dfgt_report.buttons |= G27_START_MASK;
   //
-  //whl_ps3_dfgt_report.psButton = rep[G29_PS_IDX];
+  if (rep[G29_PS_IDX] & G29_PS_MASK)
+    whl_ps3_dfgt_report.buttons3 = 0x7f;
+  else
+    whl_ps3_dfgt_report.buttons3 = 0x7e;
   //
-  whl_ps3_dfgt_report.buttonsAndWheel = (whl & 0xffff)<<2;//((whl>>8) & 0xff) | ((whl & 0xff)<<8);
+  whl_ps3_dfgt_report.wheel = (whl & 0xffff);//<<2;//((whl>>8) & 0xff) | ((whl & 0xff)<<8);
   whl_ps3_dfgt_report.gasPedal = acc & 0xff;
   whl_ps3_dfgt_report.brakePedal = brk & 0xff;
   //
-  if (1)
+  if (0)
   {
     extern char *whl_report;
-    printf ("\n#whl in %d bytes: ", WHL_PS3_DFGT_REPORT_LEN);
+    printf ("\n#whl out %d bytes: ", WHL_PS3_DFGT_REPORT_LEN);
     for (int i = 0; i < WHL_PS3_DFGT_REPORT_LEN; i++)
       printf ("%02X ", whl_report[i]);
     //ff_lg_decode_command (ffbin + 2);

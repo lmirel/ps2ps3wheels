@@ -7,7 +7,21 @@ spoofed devices:
 //PS3:Logitech Driving Force GT
 //PS3:Logitech G27
 
+    //PS4:Fanatec CSL Elite Pro                                                                                                                                                                                                                                                 
+    {0x0EB7, 0x0E04, NULL, NULL, NULL, 0x03, "PS4:Fanatec CSL Elite Pro",},                                                                                                                                                                                                     
+    //PS2:Logitech Driving Force                                                                                                                                                                                                                                                
+    {0x046D, 0xC294, whl_ps2_df_convert, ffb_ps2_df_convert, (char *)&whl_ps2_df_report, 0x03, "PS2:Logitech Driving Force",},                                                                                                                                                  
+    //PS3:Logitech Driving Force GT                                                                                                                                                                                                                                             
+    {0x046D, 0xC29A, whl_ps3_dfgt_convert, ffb_ps3_dfgt_convert, (char *)&whl_ps3_dfgt_report, 0x03, "PS3:Logitech Driving Force GT",},                                                                                                                                   
+    //PS3:Logitech G27                                                                                                                                                                                                                                                          
+    {0x046D, 0xC29B, whl_ps3_g27_convert, ffb_ps3_g27_convert, (char *)&whl_ps3_g27_report, 0x03, "PS3:Logitech G27",},
+
 example usage:
+# PS2 DF
+./usbxtract --tty /dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0 --device 0eb7:0e04 --spoof 046D:C294
+# PS3 DFGT - best compatibility
+./usbxtract --tty /dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0 --device 0eb7:0e04 --spoof 046D:C29A
+# PS3 G27
 ./usbxtract --tty /dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0 --device 0eb7:0e04 --spoof 046D:C29B
 
 it can be extended to help drive a motion platform using the concepts in https://github.com/lmirel/mfc
