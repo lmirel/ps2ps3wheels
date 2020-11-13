@@ -1,11 +1,11 @@
 adapted from `serialusb` https://github.com/matlo/serialusb
 
 used for spoofing different logitech wheels for use with PS2 and PS3 based on Fanatec Elite CSL (PS4) base.
-//PS4:Fanatec CSL Elite Pro - input device
+- PS4:Fanatec CSL Elite Pro - input device
 spoofed devices:
-//PS2:Logitech Driving Force
-//PS3:Logitech Driving Force GT
-//PS3:Logitech G27
+- PS2:Logitech Driving Force
+- PS3:Logitech Driving Force GT
+- PS3:Logitech G27
 
     //PS4:Fanatec CSL Elite Pro                                                                                                                                                                                                                                                 
     {0x0EB7, 0x0E04, NULL, NULL, NULL, 0x03, "PS4:Fanatec CSL Elite Pro",},                                                                                                                                                                                                     
