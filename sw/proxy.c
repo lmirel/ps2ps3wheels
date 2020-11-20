@@ -19,15 +19,17 @@
 #include <prio.h>
 #include <sys/time.h>
 
+#include <ff_lg.h>
+
 #define ENDPOINT_MAX_NUMBER USB_ENDPOINT_NUMBER_MASK
 
 #define KNRM  "\x1B[0m"
 #define KRED  "\x1B[31m"
 #define KGRN  "\x1B[32m"
 
-#define PRINT_ERROR_OTHER(MESSAGE) fprintf(stderr, "%s:%d %s: %s\n", __FILE__, __LINE__, __func__, MESSAGE);
-#define PRINT_TRANSFER_WRITE_ERROR(ENDPOINT,MESSAGE) fprintf(stderr, "%s:%d %s: write transfer failed on endpoint %hhu with error: %s\n", __FILE__, __LINE__, __func__, ENDPOINT & USB_ENDPOINT_NUMBER_MASK, MESSAGE);
-#define PRINT_TRANSFER_READ_ERROR(ENDPOINT,MESSAGE) fprintf(stderr, "%s:%d %s: read transfer failed on endpoint %hhu with error: %s\n", __FILE__, __LINE__, __func__, ENDPOINT & USB_ENDPOINT_NUMBER_MASK, MESSAGE);
+#define PRINT_ERROR_OTHER(MESSAGE) fprintf(stderr, "\n#e:%s:%d %s: %s", __FILE__, __LINE__, __func__, MESSAGE);
+#define PRINT_TRANSFER_WRITE_ERROR(ENDPOINT,MESSAGE) fprintf(stderr, "\n#e:%s:%d %s: write transfer failed on endpoint %hhu with error: %s", __FILE__, __LINE__, __func__, ENDPOINT & USB_ENDPOINT_NUMBER_MASK, MESSAGE);
+#define PRINT_TRANSFER_READ_ERROR(ENDPOINT,MESSAGE) fprintf(stderr, "\n#e:%s:%d %s: read transfer failed on endpoint %hhu with error: %s", __FILE__, __LINE__, __func__, ENDPOINT & USB_ENDPOINT_NUMBER_MASK, MESSAGE);
 
 static int usb = -1;
 static int adapter = -1;
@@ -258,6 +260,30 @@ static s_report_dfPs2 whl_ps2_df_report =
 };
 
 #define WHL_PS2_DF_REPORT_LEN  8
+//- Driving Force Pro
+typedef struct __attribute__((packed))
+{
+  unsigned char endpoint;
+  unsigned short buttonsAndWheel; // 14 LSB = wheel, 2 MSB = buttons
+  unsigned short hatAndButtons; // 12 LSB = buttons, 4 MSB = hat
+  unsigned char unknown1;
+  unsigned char gasPedal;
+  unsigned char brakePedal;
+  unsigned char unknown2;
+} s_report_dfpPs2;
+
+static s_report_dfpPs2 whl_ps2_dfp_report =
+{
+  .endpoint = 0x81,
+  .buttonsAndWheel = CENTER_AXIS_VALUE_14BITS,
+  .hatAndButtons = 0x8000,
+  .unknown1 = 0x7f,
+  .gasPedal = MAX_AXIS_VALUE_8BITS,
+  .brakePedal = MAX_AXIS_VALUE_8BITS,
+  .unknown2 = 0xff,
+};
+
+#define WHL_PS2_DFP_REPORT_LEN  9
 //--
 /*
 whl left-right
@@ -377,6 +403,8 @@ int spoof_device_index = -1; //spf_0x046d_0xc294_idx; //device spoof index
 #if 1
 int whl_ps2_df_convert (char *rep, int rl);
 int ffb_ps2_df_convert (unsigned char *ffbin, unsigned char *ffbot, int inlen);
+int whl_ps2_dfp_convert (char *rep, int rl);
+int ffb_ps2_dfp_convert (unsigned char *ffbin, unsigned char *ffbot, int inlen);
 int whl_ps3_dfgt_convert (char *rep, int rl);
 int ffb_ps3_dfgt_convert (unsigned char *ffbin, unsigned char *ffbot, int inlen);
 int whl_ps3_g27_convert (char *rep, int rl);
@@ -397,6 +425,8 @@ proc_list spoof_handlers[] = {
     {0x0EB7, 0x0E04, NULL, NULL, NULL, 0x03, "PS4:Fanatec CSL Elite Pro",},
     //PS2:Logitech Driving Force
     {0x046D, 0xC294, whl_ps2_df_convert, ffb_ps2_df_convert, (char *)&whl_ps2_df_report, 0x03, "PS2:Logitech Driving Force",},
+    //PS2:Logitech Driving Force Pro
+    {0x046D, 0xC298, whl_ps2_dfp_convert, ffb_ps2_dfp_convert, (char *)&whl_ps2_dfp_report, 0x03, "PS2:Logitech Driving Force Pro",},
     //PS3:Logitech Driving Force GT
     {0x046D, 0xC29A, whl_ps3_dfgt_convert, ffb_ps3_dfgt_convert, (char *)&whl_ps3_dfgt_report, 0x03, "PS3:Logitech Driving Force GT",},
     //PS3:Logitech G27
@@ -457,7 +487,59 @@ static SPOOF_PKT devs_spoof[] = {
   {0x02, 0x06, {0x81, 0x03, 0x08, 0x02, 0x03, 0x08,}},
   //3:reset to end the chain
   {E_TYPE_RESET, 0x00, {0x00}},
-  //Logitech DFGT - PS3 mode
+  //---------------------------------------------------------------------------
+  //Logitech Driving Force Pro - PS2
+/*
+#i:initializing USB proxy with device 046d:c298
+#i:using device: VID 0x046d PID 0xc298 PATH 01:01:04
+endpoint: IN INTERRUPT 1
+endpoint: OUT INTERRUPT 2
+#s2u[0]: 00 02 00 00 00 00 00 00 00 00 00 00 00 00 00
+#u2s[0]: 00 02 00 00 00 00 00 00 00 00 00 00 00 00 00
+#s2u[1]: 81 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#u2s[1]: 81 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#i:starting
+#d:adapter opened '/dev/serial/by-id/usb-Silicon_Labs_CP2102_USB_to_UART_Bridge_Controller_0001-if00-port0'->'/dev/ttyUSB0':0
+#i:sending descriptors
+#d:adapter sent 234B
+#PKT:232 bytes, type 0
+##0x12, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x08, 0x6d, 0x04, 0x98, 0xc2, 0x06, 0x11, 0x03, 0x01, 0x00, 0x01, 0x04, 0x03, 0x09, 0x04, 0x09, 0x02, 0x29, 0x00, 0x01, 0x01, 0x00, 0x80, 0x28, 0x09, 0x04, 0x00, 0x00, 0x02, 0x03, 0x00, 0x00, 0x00, 0x09, 0x21, 0x00, 0x01, 0x21, 0x01, 0x22, 0x61, 0x00, 0x07, 0x05, 0x81, 0x03, 0x08, 0x00, 0x0a, 0x07, 0x05, 0x02, 0x03, 0x08, 0x00, 0x0a, 0x12, 0x03, 0x4c, 0x00, 0x6f, 0x00, 0x67, 0x00, 0x69, 0x00, 0x74, 0x00, 0x65, 0x00, 0x63, 0x00, 0x68, 0x00, 0x36, 0x03, 0x4c, 0x00, 0x6f, 0x00, 0x67, 0x00, 0x69, 0x00, 0x74, 0x00, 0x65, 0x00, 0x63, 0x00, 0x68, 0x00, 0x20, 0x00, 0x44, 0x00, 0x72, 0x00, 0x69, 0x00, 0x76, 0x00, 0x69, 0x00, 0x6e, 0x00, 0x67, 0x00, 0x20, 0x00, 0x46, 0x00, 0x6f, 0x00, 0x72, 0x00, 0x63, 0x00, 0x65, 0x00, 0x20, 0x00, 0x50, 0x00, 0x72, 0x00, 0x6f, 0x00, 0x05, 0x01, 0x09, 0x04, 0xa1, 0x01, 0xa1, 0x02, 0x95, 0x01, 0x75, 0x0e, 0x15, 0x00, 0x26, 0xff, 0x3f, 0x35, 0x00, 0x46, 0xff, 0x3f, 0x09, 0x30, 0x81, 0x02, 0x95, 0x0e, 0x75, 0x01, 0x25, 0x01, 0x45, 0x01, 0x05, 0x09, 0x19, 0x01, 0x29, 0x0e, 0x81, 0x02, 0x05, 0x01, 0x95, 0x01, 0x75, 0x04, 0x25, 0x07, 0x46, 0x3b, 0x01, 0x65, 0x14, 0x09, 0x39, 0x81, 0x42, 0x65, 0x00, 0x95, 0x01, 0x75, 0x08, 0x26, 0xff, 0x00, 0x46, 0xff, 0x00, 0x09, 0x31, 0x81, 0x02, 0x06, 0x00, 0xff, 0x09, 0x00, 0x95, 0x03, 0x75, 0x08, 0x81, 0x02, 0xc0, 0xa1, 0x02, 0x09, 0x02, 0x95, 0x07, 0x91, 0x02, 0xc0, 0xc0,
+#d:adapter sent 50B
+#PKT:048 bytes, type 1
+##0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x12, 0x00, 0x12, 0x00, 0x00, 0x03, 0x00, 0x00, 0x04, 0x00, 0x16, 0x00, 0x00, 0x02, 0x00, 0x00, 0x29, 0x00, 0x3f, 0x00, 0x03, 0x03, 0x09, 0x04, 0x12, 0x00, 0x51, 0x00, 0x01, 0x03, 0x09, 0x04, 0x36, 0x00, 0x87, 0x00, 0x00, 0x22, 0x00, 0x00, 0x61, 0x00,
+#i:ready descriptors
+#PKT:048 bytes, type 1
+##0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x12, 0x00, 0x12, 0x00, 0x00, 0x03, 0x00, 0x00, 0x04, 0x00, 0x16, 0x00, 0x00, 0x02, 0x00, 0x00, 0x29, 0x00, 0x3f, 0x00, 0x03, 0x03, 0x09, 0x04, 0x12, 0x00, 0x51, 0x00, 0x01, 0x03, 0x09, 0x04, 0x36, 0x00, 0x87, 0x00, 0x00, 0x22, 0x00, 0x00, 0x61, 0x00,
+#d:adapter sent 8B
+#PKT:006 bytes, type 2
+##0x81, 0x03, 0x08, 0x02, 0x03, 0x08,
+#i:ready indexes
+#PKT:006 bytes, type 2
+##0x81, 0x03, 0x08, 0x02, 0x03, 0x08,
+#i:ready
+*/
+  //#i:using device: VID 0x046d PID 0xc298 PATH 01:01:01:02
+  //opt: --spoof 046D:C298
+  //VID&PID debug message
+  {E_TYPE_DEBUG, 0x06, {0x04, 0x6D, 0xC2, 0x98, 0x81, 0x03}},
+  //#i:sending descriptors
+  //#PKT:232 bytes, type 0
+  //##0x12, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x08, 0x6d, 0x04, 0x98, 0xc2, 0x06, 0x11, 0x03, 0x01, 0x00, 0x01, 0x04, 0x03, 0x09, 0x04, 0x09, 0x02, 0x29, 0x00, 0x01, 0x01, 0x00, 0x80, 0x28, 0x09, 0x04, 0x00, 0x00, 0x02, 0x03, 0x00, 0x00, 0x00, 0x09, 0x21, 0x00, 0x01, 0x21, 0x01, 0x22, 0x61, 0x00, 0x07, 0x05, 0x81, 0x03, 0x08, 0x00, 0x0a, 0x07, 0x05, 0x02, 0x03, 0x08, 0x00, 0x0a, 0x12, 0x03, 0x4c, 0x00, 0x6f, 0x00, 0x67, 0x00, 0x69, 0x00, 0x74, 0x00, 0x65, 0x00, 0x63, 0x00, 0x68, 0x00, 0x36, 0x03, 0x4c, 0x00, 0x6f, 0x00, 0x67, 0x00, 0x69, 0x00, 0x74, 0x00, 0x65, 0x00, 0x63, 0x00, 0x68, 0x00, 0x20, 0x00, 0x44, 0x00, 0x72, 0x00, 0x69, 0x00, 0x76, 0x00, 0x69, 0x00, 0x6e, 0x00, 0x67, 0x00, 0x20, 0x00, 0x46, 0x00, 0x6f, 0x00, 0x72, 0x00, 0x63, 0x00, 0x65, 0x00, 0x20, 0x00, 0x50, 0x00, 0x72, 0x00, 0x6f, 0x00, 0x05, 0x01, 0x09, 0x04, 0xa1, 0x01, 0xa1, 0x02, 0x95, 0x01, 0x75, 0x0e, 0x15, 0x00, 0x26, 0xff, 0x3f, 0x35, 0x00, 0x46, 0xff, 0x3f, 0x09, 0x30, 0x81, 0x02, 0x95, 0x0e, 0x75, 0x01, 0x25, 0x01, 0x45, 0x01, 0x05, 0x09, 0x19, 0x01, 0x29, 0x0e, 0x81, 0x02, 0x05, 0x01, 0x95, 0x01, 0x75, 0x04, 0x25, 0x07, 0x46, 0x3b, 0x01, 0x65, 0x14, 0x09, 0x39, 0x81, 0x42, 0x65, 0x00, 0x95, 0x01, 0x75, 0x08, 0x26, 0xff, 0x00, 0x46, 0xff, 0x00, 0x09, 0x31, 0x81, 0x02, 0x06, 0x00, 0xff, 0x09, 0x00, 0x95, 0x03, 0x75, 0x08, 0x81, 0x02, 0xc0, 0xa1, 0x02, 0x09, 0x02, 0x95, 0x07, 0x91, 0x02, 0xc0, 0xc0,
+  //0: descriptors
+  {0x00, 0xe8, {0x12, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x08, 0x6d, 0x04, 0x98, 0xc2, 0x06, 0x11, 0x03, 0x01, 0x00, 0x01, 0x04, 0x03, 0x09, 0x04, 0x09, 0x02, 0x29, 0x00, 0x01, 0x01, 0x00, 0x80, 0x28, 0x09, 0x04, 0x00, 0x00, 0x02, 0x03, 0x00, 0x00, 0x00, 0x09, 0x21, 0x00, 0x01, 0x21, 0x01, 0x22, 0x61, 0x00, 0x07, 0x05, 0x81, 0x03, 0x08, 0x00, 0x0a, 0x07, 0x05, 0x02, 0x03, 0x08, 0x00, 0x0a, 0x12, 0x03, 0x4c, 0x00, 0x6f, 0x00, 0x67, 0x00, 0x69, 0x00, 0x74, 0x00, 0x65, 0x00, 0x63, 0x00, 0x68, 0x00, 0x36, 0x03, 0x4c, 0x00, 0x6f, 0x00, 0x67, 0x00, 0x69, 0x00, 0x74, 0x00, 0x65, 0x00, 0x63, 0x00, 0x68, 0x00, 0x20, 0x00, 0x44, 0x00, 0x72, 0x00, 0x69, 0x00, 0x76, 0x00, 0x69, 0x00, 0x6e, 0x00, 0x67, 0x00, 0x20, 0x00, 0x46, 0x00, 0x6f, 0x00, 0x72, 0x00, 0x63, 0x00, 0x65, 0x00, 0x20, 0x00, 0x50, 0x00, 0x72, 0x00, 0x6f, 0x00, 0x05, 0x01, 0x09, 0x04, 0xa1, 0x01, 0xa1, 0x02, 0x95, 0x01, 0x75, 0x0e, 0x15, 0x00, 0x26, 0xff, 0x3f, 0x35, 0x00, 0x46, 0xff, 0x3f, 0x09, 0x30, 0x81, 0x02, 0x95, 0x0e, 0x75, 0x01, 0x25, 0x01, 0x45, 0x01, 0x05, 0x09, 0x19, 0x01, 0x29, 0x0e, 0x81, 0x02, 0x05, 0x01, 0x95, 0x01, 0x75, 0x04, 0x25, 0x07, 0x46, 0x3b, 0x01, 0x65, 0x14, 0x09, 0x39, 0x81, 0x42, 0x65, 0x00, 0x95, 0x01, 0x75, 0x08, 0x26, 0xff, 0x00, 0x46, 0xff, 0x00, 0x09, 0x31, 0x81, 0x02, 0x06, 0x00, 0xff, 0x09, 0x00, 0x95, 0x03, 0x75, 0x08, 0x81, 0x02, 0xc0, 0xa1, 0x02, 0x09, 0x02, 0x95, 0x07, 0x91, 0x02, 0xc0, 0xc0,}},
+  //#PKT:048 bytes, type 1
+  //##0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x12, 0x00, 0x12, 0x00, 0x00, 0x03, 0x00, 0x00, 0x04, 0x00, 0x16, 0x00, 0x00, 0x02, 0x00, 0x00, 0x29, 0x00, 0x3f, 0x00, 0x03, 0x03, 0x09, 0x04, 0x12, 0x00, 0x51, 0x00, 0x01, 0x03, 0x09, 0x04, 0x36, 0x00, 0x87, 0x00, 0x00, 0x22, 0x00, 0x00, 0x61, 0x00,
+  //1: index
+  {0x01, 0x30, {0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x12, 0x00, 0x12, 0x00, 0x00, 0x03, 0x00, 0x00, 0x04, 0x00, 0x16, 0x00, 0x00, 0x02, 0x00, 0x00, 0x29, 0x00, 0x3f, 0x00, 0x03, 0x03, 0x09, 0x04, 0x12, 0x00, 0x51, 0x00, 0x01, 0x03, 0x09, 0x04, 0x36, 0x00, 0x87, 0x00, 0x00, 0x22, 0x00, 0x00, 0x61, 0x00,}},
+  //#i:ready descriptors
+  //#PKT:006 bytes, type 2
+  //##0x81, 0x03, 0x08, 0x02, 0x03, 0x08,
+  //2: endpoints
+  {0x02, 0x06, {0x81, 0x03, 0x08, 0x02, 0x03, 0x08,}},
+  //3:reset to end the chain
+  {E_TYPE_RESET, 0x00, {0x00}},
+  //---------------------------------------------------------------------------
+  //Logitech Driving Force GT - PS3 mode
 #if 0
 /*                                                                                                                                                                                                                                                                              
  * The reference report data.                                                                                                                                                                                                                                                   
@@ -536,6 +618,7 @@ button map
   {0x02, 0x06, {0x81, 0x03, 0x10, 0x02, 0x03, 0x10,}},
   //3:reset to end the chain
   {E_TYPE_RESET, 0x00, {0x00}},
+  //---------------------------------------------------------------------------
   //Logitech G27 - PS3 mode
 #if 0
 /*                                                                                                                                                                                                                                                                              
@@ -779,7 +862,7 @@ short get_short (unsigned char *buf, int off)
   return (short)(buf[off+1]<<8|buf[off]);
 }
 
-//--PS2: Logitech DFP
+//--PS2: Logitech Driving Force
 int whl_ps2_df_convert (char *rep, int rl)
 {
   /*
@@ -906,12 +989,192 @@ endpoint: IN INTERRUPT 4
 int ffb_ps2_df_convert (unsigned char *ffbin, unsigned char *ffbot, int inlen)
 {
   int i;
-  if (0)
+  if (1)
   {
-    printf ("\n#ffb in %d bytes: ", inlen);
+    printf ("\n#ffb DF in %d bytes: ", inlen);
     for (i = 0; i < inlen; i++)
       printf ("%02X ", ffbin[i]);
-    //ff_lg_decode_command (ffbin + 2);
+    ff_lg_decode_command (ffbin);
+    fflush (stdout);
+  }
+
+  memset (ffbot, 0x00, FFB_PS2_DF_REPORT_LEN); //out/ffb report has 33 bytes so we pad with 0
+  ffbot[0] = 0x30;
+  memcpy (ffbot + 1, ffbin, inlen);
+  //
+  if (1)
+  {
+    printf ("\n#ffb out %d bytes: ", FFB_PS2_DF_REPORT_LEN);
+    for (i = 0; i < FFB_PS2_DF_REPORT_LEN; i++)
+      printf ("%02X ", ffbot[i]);
+    //ff_lg_decode_command (ffbot + 2);
+    fflush (stdout);
+  }
+  //
+  return FFB_PS2_DF_REPORT_LEN;
+}
+
+//-----------------------------------------------------------------------------
+//--PS2: Logitech Driving Force Pro
+#define DFP_CROSS_MASK           0x4000
+#define DFP_SQUARE_MASK          0x8000
+
+#define DFP_CIRCLE_MASK          0x0001
+#define DFP_TRIANGLE_MASK        0x0002
+#define DFP_R1_MASK              0x0004
+#define DFP_L1_MASK              0x0008
+#define DFP_R2_MASK              0x0010
+#define DFP_L2_MASK              0x0020
+#define DFP_SELECT_MASK          0x0040
+#define DFP_START_MASK           0x0080
+#define DFP_R3_MASK              0x0100
+#define DFP_L3_MASK              0x0200
+#define DFP_SHIFTER_BACK_MASK    0x0400
+#define DFP_SHIFTER_FORWARD_MASK 0x0800
+/*
+//- Driving Force Pro
+typedef struct __attribute__((packed))
+{
+  unsigned char endpoint;
+  unsigned short buttonsAndWheel; // 14 LSB = wheel, 2 MSB = buttons
+  unsigned short hatAndButtons; // 12 LSB = buttons, 4 MSB = hat
+  unsigned char unknown1;
+  unsigned char gasPedal;
+  unsigned char brakePedal;
+  unsigned char unknown2;
+} s_report_dfpPs2;
+
+static s_report_dfpPs2 whl_ps2_dfp_report =
+{
+  .endpoint = 0x81,
+  .buttonsAndWheel = CENTER_AXIS_VALUE_14BITS,
+  .hatAndButtons = 0x8000,
+  .unknown1 = 0x7f,
+  .gasPedal = MAX_AXIS_VALUE_8BITS,
+  .brakePedal = MAX_AXIS_VALUE_8BITS,
+  .unknown2 = 0xff,
+};
+*/
+static s_report_dfpPs2 whl_ps2_dfp_report_default =
+{
+  .endpoint = 0x81,
+  .buttonsAndWheel = CENTER_AXIS_VALUE_14BITS,
+  .hatAndButtons = 0x8000,
+  .unknown1 = 0x7f,
+  .gasPedal = MAX_AXIS_VALUE_8BITS,
+  .brakePedal = MAX_AXIS_VALUE_8BITS,
+  .unknown2 = 0xff,
+};
+
+int whl_ps2_dfp_convert (char *rep, int rl)
+{
+  if (0)
+  {
+    printf ("\n#whl in %d bytes: ", rl);
+    for (int i = 0; i < rl; i++)
+      printf ("%02X ", rep[i]);
+    fflush (stdout);
+  }
+  memcpy ((void *)&whl_ps2_dfp_report, (void *)&whl_ps2_dfp_report_default, WHL_PS2_DFP_REPORT_LEN);
+  //
+  long whl = get_cmap (get_ushort (rep, 44), 0, MAX_AXIS_VALUE_16BITS, 0, MAX_AXIS_VALUE_14BITS);
+  long acc = get_cmap (get_ushort (rep, 46), 0, MAX_AXIS_VALUE_16BITS, 0, MAX_AXIS_VALUE_8BITS);
+  long brk = get_cmap (get_ushort (rep, 48), 0, MAX_AXIS_VALUE_16BITS, 0, MAX_AXIS_VALUE_8BITS);
+  //
+  whl_ps2_dfp_report.gasPedal = acc & 0xff;
+  whl_ps2_dfp_report.brakePedal = brk & 0xff;
+  whl_ps2_dfp_report.buttonsAndWheel = whl & 0xffff;
+  //
+  if (rep[G29_PB_IDX] & G29_SQUARE_MASK)
+    whl_ps2_dfp_report.buttonsAndWheel |= DFP_SQUARE_MASK;
+  if (rep[G29_PB_IDX] & G29_CROSS_MASK)
+    whl_ps2_dfp_report.buttonsAndWheel |= DFP_CROSS_MASK;
+  //hat
+  whl_ps2_dfp_report.hatAndButtons = (rep[G29_HB_IDX] & 0x0f) << 12;
+  if (rep[G29_LB_IDX] & G29_L1_MASK)
+    whl_ps2_dfp_report.hatAndButtons |= DFP_L1_MASK;
+  if (rep[G29_LB_IDX] & G29_R1_MASK)
+    whl_ps2_dfp_report.hatAndButtons |= DFP_R1_MASK;
+  if (rep[G29_PB_IDX] & G29_CIRCLE_MASK)
+    whl_ps2_dfp_report.hatAndButtons |= DFP_CIRCLE_MASK;
+  if (rep[G29_PB_IDX] & G29_TRIANGLE_MASK)
+    whl_ps2_dfp_report.hatAndButtons |= DFP_TRIANGLE_MASK;
+  if (rep[G29_LB_IDX] & G29_L2_MASK)
+    whl_ps2_dfp_report.hatAndButtons |= DFP_L2_MASK;
+  if (rep[G29_LB_IDX] & G29_R2_MASK)
+    whl_ps2_dfp_report.hatAndButtons |= DFP_R2_MASK;
+  if (rep[G29_LB_IDX] & G29_L3_MASK)
+    whl_ps2_dfp_report.hatAndButtons |= DFP_L3_MASK;
+  if (rep[G29_LB_IDX] & G29_R3_MASK)
+    whl_ps2_dfp_report.hatAndButtons |= DFP_R3_MASK;
+  if (rep[G29_LB_IDX] & G29_SHARE_MASK)
+    whl_ps2_dfp_report.hatAndButtons |= DFP_SELECT_MASK;
+  if (rep[G29_LB_IDX] & G29_OPTIONS_MASK)
+    whl_ps2_dfp_report.hatAndButtons |= DFP_START_MASK;
+  //
+  if (0)
+  {
+    printf ("\n#whl out %d bytes: ", WHL_PS2_DFP_REPORT_LEN);
+    for (int i = 0; i < WHL_PS2_DFP_REPORT_LEN; i++)
+      printf ("%02X ", ((char *)&whl_ps2_dfp_report)[i]);
+    fflush (stdout);
+  }
+  return WHL_PS2_DFP_REPORT_LEN;
+}
+
+/*
+#i:initializing USB proxy with device 0eb7:0e04
+#i:using device: VID 0x0eb7 PID 0x0e04 PATH 01:01:01:02                                                           
+endpoint: OUT INTERRUPT 3               
+endpoint: IN INTERRUPT 4                                                                                          
+#s2u[0]: 00 00 03 00 00 00 00 00 00 00 00 00 00 00 00
+#u2s[0]: 00 00 03 00 00 00 00 00 00 00 00 00 00 00 00                                                             
+#s2u[1]: 00 00 00 84 00 00 00 00 00 00 00 00 00 00 00
+#u2s[1]: 00 00 00 84 00 00 00 00 00 00 00 00 00 00 00                                                             
+#i:starting                             
+#i:sending descriptors                                                                                            
+#skip sending descriptors               
+#spoof dev data 4 type 00                                                                                         
+#spoof dev data 5 type 01               
+#spoof dev data 6 type 02                                                                                         
+#i:ready descriptors                    
+#i:ready descriptors                                                                                              
+#i:ready indexes                        
+#i:ready                                                                                                          
+#ffb in 8 bytes: f3 cb 01 00 28 15 80 bf
+#ffb out 32 bytes: 30 f3 cb 01 00 28 15 80 bf 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#ffb in 8 bytes: f4 cb 01 00 28 15 80 bf
+#ffb out 32 bytes: 30 f4 cb 01 00 28 15 80 bf 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#ffb in 8 bytes: 09 03 00 00 00 00 00 00
+#ffb out 32 bytes: 30 09 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#ffb in 8 bytes: 13 03 00 00 00 00 00 00
+#ffb out 32 bytes: 30 13 03 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#ffb in 8 bytes: f5 00 00 00 00 00 00 00
+#ffb out 32 bytes: 30 f5 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#ffb in 8 bytes: 11 08 82 80 00 00 00 00
+#ffb out 32 bytes: 30 11 08 82 80 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#ffb in 8 bytes: f4 00 00 00 00 00 00 00
+#ffb out 32 bytes: 30 f4 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#ffb in 8 bytes: 13 00 00 00 00 00 00 00
+#ffb out 32 bytes: 30 13 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#ffb in 8 bytes: f5 00 00 00 00 00 00 00
+#ffb out 32 bytes: 30 f5 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#ffb in 8 bytes: 11 08 82 80 00 00 00 00
+#ffb out 32 bytes: 30 11 08 82 80 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+#ffb in 8 bytes: 11 08 7f 80 00 00 00 00
+#ffb out 32 bytes: 30 11 08 7f 80 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
+*/
+#define FFB_PS2_DFP_REPORT_LEN  0x20
+#define FFB_ps2_dfp_out_ep 0x03
+int ffb_ps2_dfp_convert (unsigned char *ffbin, unsigned char *ffbot, int inlen)
+{
+  int i;
+  if (1)
+  {
+    printf ("\n#ffb DFP in %d bytes: ", inlen);
+    for (i = 0; i < inlen; i++)
+      printf ("%02X ", ffbin[i]);
+    ff_lg_decode_command (ffbin);
     fflush (stdout);
   }
   //ff_lg_decode_command (ffbin + 2);
@@ -923,20 +1186,25 @@ int ffb_ps2_df_convert (unsigned char *ffbin, unsigned char *ffbot, int inlen)
   printf ("\ncmd %02X slt %02X ftp %02X pars(1-5): %02X %02X %02X %02X %02X ", cmd, slt, ftp, ffbin[4], ffbin[5], ffbin[6], ffbin[7], ffbin[8]);
   fflush (stdout);
   */
-  memset (ffbot, 0x00, FFB_PS2_DF_REPORT_LEN); //out/ffb report has 33 bytes so we pad with 0
+  //1. source process + extended: get forces + params > push in fifo
+  //2. source get: convert forces + extended
+  //3. sink convert slot > send report
+  memset (ffbot, 0x00, FFB_PS2_DFP_REPORT_LEN); //out/ffb report has 33 bytes so we pad with 0
   ffbot[0] = 0x30;
+  //convert report from old to new
   memcpy (ffbot + 1, ffbin, inlen);
-  //
-  if (0)
+  if (1)
+    ff_lg_convert (ffbin, ffbot + 1);
+  if (1)
   {
-    printf ("\n#ffb out %d bytes: ", FFB_PS2_DF_REPORT_LEN);
-    for (i = 0; i < FFB_PS2_DF_REPORT_LEN; i++)
+    printf ("\n#ffb out %d bytes: ", FFB_PS2_DFP_REPORT_LEN);
+    for (i = 0; i < FFB_PS2_DFP_REPORT_LEN; i++)
       printf ("%02X ", ffbot[i]);
     //ff_lg_decode_command (ffbot + 2);
     fflush (stdout);
   }
   //
-  return FFB_PS2_DF_REPORT_LEN;
+  return FFB_PS2_DFP_REPORT_LEN;
 }
 
 //--PS3: Logitech DFGT/G25
@@ -1088,7 +1356,6 @@ int whl_ps3_dfgt_convert (char *rep, int rl)
     printf ("\n#whl in %d bytes: ", rl);
     for (int i = 0; i < rl; i++)
       printf ("%02X ", rep[i]);
-    //ff_lg_decode_command (ffbin + 2);
     fflush (stdout);
   }
   //wheel and pedals
@@ -1145,7 +1412,6 @@ int whl_ps3_dfgt_convert (char *rep, int rl)
     printf ("\n#whl out %d bytes: ", WHL_PS3_DFGT_REPORT_LEN);
     for (int i = 0; i < WHL_PS3_DFGT_REPORT_LEN; i++)
       printf ("%02X ", whl_report[i]);
-    //ff_lg_decode_command (ffbin + 2);
     fflush (stdout);
   }
   return WHL_PS3_DFGT_REPORT_LEN;
@@ -1156,12 +1422,12 @@ int whl_ps3_dfgt_convert (char *rep, int rl)
 int ffb_ps3_dfgt_convert (unsigned char *ffbin, unsigned char *ffbot, int inlen)
 {
   int i;
-  if (0)
+  if (1)
   {
-    printf ("\n#ffb in %d bytes: ", inlen);
+    printf ("\n#ffb DFGT in %d bytes: ", inlen);
     for (i = 0; i < inlen; i++)
       printf ("%02X ", ffbin[i]);
-    //ff_lg_decode_command (ffbin + 2);
+    ff_lg_decode_command (ffbin);
     fflush (stdout);
   }
   //ff_lg_decode_command (ffbin + 2);
@@ -1197,7 +1463,6 @@ int whl_ps3_g27_convert (char *rep, int rl)
     printf ("\n#whl in %d bytes: ", rl);
     for (int i = 0; i < rl; i++)
       printf ("%02X ", rep[i]);
-    //ff_lg_decode_command (ffbin + 2);
     fflush (stdout);
   }
   //wheel and pedals
@@ -1256,7 +1521,6 @@ int whl_ps3_g27_convert (char *rep, int rl)
     printf ("\n#whl in %d bytes: ", WHL_PS3_G27_REPORT_LEN);
     for (int i = 0; i < WHL_PS3_G27_REPORT_LEN; i++)
       printf ("%02X ", whl_report[i]);
-    //ff_lg_decode_command (ffbin + 2);
     fflush (stdout);
   }  //
   return WHL_PS3_G27_REPORT_LEN;
@@ -1296,12 +1560,13 @@ int ffb_ps3_g27_convert (unsigned char *ffbin, unsigned char *ffbot, int inlen)
     fflush (stdout);
   }
   //
-  return FFB_PS3_G27_REPORT_LEN;
+  return 0; //FFB_PS3_G27_REPORT_LEN;
 }
 //
 //--end spoof
 //*****************************************************************************
-//
+
+// send report from wheel to emulator
 static int send_next_in_packet()
 {
 
@@ -1539,7 +1804,7 @@ static char * usb_select (int vid, int pid)
   } else 
   {
 //	    fprintf (stderr, "\n#e:USB device not found!");
-    fprintf (stdout, "\n#e:USB device not found!");
+    fprintf (stdout, "\n#e:USB device %04x:%04x not found!", vid, pid);
   }
   //
   gusb_free_enumeration (usb_devs);
@@ -1868,6 +2133,8 @@ static int poll_all_endpoints ()
 #ffb 64 bytes: 30 F8 81 FF FF 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 #ffb 64 bytes: 30 F5 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
 */
+
+// send ffb from emulator to wheel
 unsigned char ffb_packet[256];
 static int send_out_packet(s_packet * packet) 
 {
@@ -1905,15 +2172,37 @@ static int send_out_packet(s_packet * packet)
       printf ("\n#ffb drop: range out of bounds %02X", buf[3]);
       return 0;
     }
-    //
+    //don't send it if it was not processed
+    if (bsz == 0)
+      return 0;
     //return gusb_write (usb, S2U_ENDPOINT(epPacket->endpoint), buf, bsz);
     //return gusb_write (usb, 0x03, buf, bsz);
-    return gusb_write (usb, S2U_ENDPOINT(epPacket->endpoint), buf, bsz);
+    int ret = gusb_write (usb, S2U_ENDPOINT(epPacket->endpoint), buf, bsz);
+    if (0)
+    {
+      printf ("\n#ffb %d bytes for ep %02X: ", bsz, S2U_ENDPOINT(epPacket->endpoint));
+      for (int i = 0; i < bsz; i++)
+        printf ("%02X ", buf[i]);
+      ff_lg_decode_command (buf + 1);
+      fflush (stdout);
+    }
+    return ret;
   }
-  else
-    return gusb_write (usb, S2U_ENDPOINT(epPacket->endpoint), epPacket->data, packet->header.length - 1);
+  int ret = gusb_write (usb, S2U_ENDPOINT(epPacket->endpoint), epPacket->data, packet->header.length - 1);
+  if (0)
+  {
+    int  bsz = packet->header.length - 1;
+    unsigned char *buf = (unsigned char *)epPacket->data;
+    printf ("\n#ffb %d bytes for ep %02X: ", bsz, S2U_ENDPOINT(epPacket->endpoint));
+    for (int i = 0; i < bsz; i++)
+      printf ("%02X ", buf[i]);
+    ff_lg_decode_command (buf + 1);
+    fflush (stdout);
+  }
+  return ret;
 }
 
+// send control pkt from emulator to wheel
 static int send_control_packet(s_packet * packet) 
 {
 
@@ -1925,6 +2214,14 @@ static int send_control_packet(s_packet * packet)
     }
   }
 
+  if (1)
+  {
+    unsigned char *buf = (unsigned char *)packet->value;
+    printf ("\n#ctl %d bytes for ep %02X: ", packet->header.length, 0);
+    for (int i = 0; i < packet->header.length; i++)
+      printf ("%02X ", buf[i]);
+    fflush (stdout);
+  }
   return gusb_write (usb, 0, packet->value, packet->header.length);
 }
 

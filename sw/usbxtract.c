@@ -165,7 +165,7 @@ int main (int argc, char * argv[])
     usage ();
     return -1;
   }
-  printf ("#i:initializing USB proxy with device %s", udev);
+  printf ("\n#i:initializing USB proxy with device %s", udev);
   ret = proxy_init (vid, pid);  //T300RS
 
   if (ret == 0) 

@@ -107,12 +107,12 @@ static int client_send (s_packet *packet)
     dpkt.value[5] = mdt & 0xff;
   }
   //
-  if (0 && packet->header.length > 60)
+  if (adapterDbg) //(0 && packet->header.length > 60)
   {
     int i;
     printf ("\n#PKT:%03d bytes, type %x\n##", packet->header.length, packet->header.type);
     for (i = 0; i < packet->header.length; i++)
-      printf ("%02x ", packet->value[i]);
+      printf ("0x%02x, ", packet->value[i]);
     fflush (stdout);
   }
   if (csock < 0)
