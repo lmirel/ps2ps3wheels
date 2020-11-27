@@ -442,14 +442,22 @@ static uint16_t ff_lg_get_damper_clip(uint8_t caps, unsigned char c) {
     return clip;
 }
 
+long get_map (long x, long in_min, long in_max, long out_min, long out_max);
+
+unsigned char uget_cmap (unsigned char x, unsigned char  in_min, unsigned char  in_max, unsigned char  out_min, unsigned char out_max)
+{
+  unsigned char rv = (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+  return rv;
+}
+
 int ff_lg_convert_force(unsigned char caps, const unsigned char *data, unsigned char *ffbot)
 {
-    int ret = 0;
+    int ret = FF_LG_OUTPUT_REPORT_SIZE;
     s_ff_lg_command * force = (s_ff_lg_command *)(data + 1);
     uint8_t * cmd = ffbot;
     s_ff_lg_command * command = (s_ff_lg_command *)(ffbot + 1);
     //copy command
-    *cmd = data[0];
+    *cmd = data[0] & 0x0f;  //remove slot info, keep only the command
     //
     int slot_index = (data[0] >> 4); //get slot number
     //
@@ -457,14 +465,16 @@ int ff_lg_convert_force(unsigned char caps, const unsigned char *data, unsigned 
     {
     case FF_LG_FTYPE_CONSTANT:
     {
+        ret = 0;
         //to->type = E_DATA_TYPE_CONSTANT;
         command->force_type = FF_LG_FTYPE_VARIABLE;
         command->parameters[0] = FF_LG_CONSTANT_LEVEL(force, slot_index - 1);//ff_lg_s16_to_u8(from->constant.level);
-        command->parameters[1] = 0x80;
+        command->parameters[1] = 0x00;//0x80;
     }
         break;
     case FF_LG_FTYPE_VARIABLE:
     {
+        //ret = 0;
         command->force_type = FF_LG_FTYPE_VARIABLE;
         //to->type = E_DATA_TYPE_CONSTANT;
         if (slot_index == 1)
@@ -476,8 +486,10 @@ int ff_lg_convert_force(unsigned char caps, const unsigned char *data, unsigned 
             }
             else
             {
+                //  long rv = (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+                //command->parameters[0] = get_map (FF_LG_VARIABLE_L1(force), 0xfe, 0x01, 0xa0, 0x50);//FF_LG_VARIABLE_L1(force);//ff_lg_s16_to_u8(from->constant.level);
                 command->parameters[0] = FF_LG_VARIABLE_L1(force);//ff_lg_s16_to_u8(from->constant.level);
-                command->parameters[1] = 0x80;
+                command->parameters[1] = 0x00;//0x80;
             }
         }
         else if (slot_index == 3)
@@ -491,20 +503,23 @@ int ff_lg_convert_force(unsigned char caps, const unsigned char *data, unsigned 
             {
                 //to->constant.level = ff_lg_u8_to_s16(FF_LG_VARIABLE_L2(force));
                 command->parameters[0] = FF_LG_VARIABLE_L2(force);//ff_lg_s16_to_u8(from->constant.level);
-                command->parameters[1] = 0x80;
+                command->parameters[1] = 0x00;//0x80;
             }
         }
         else
         {
             printf ("\n#w:variable force cannot be converted to constant force for slot 0x%x", slot_index);
             command->parameters[0] = force->parameters[0];//ff_lg_s16_to_u8(from->constant.level);
-            command->parameters[1] = 0x80;
+            command->parameters[1] = 0x00;//0x80;
         }
+        //avoid extreme moves
+        if (command->parameters[0] > 0xf0 || command->parameters[0] < 0x10)
+            ret = 0;
     }
         break;
     case FF_LG_FTYPE_SPRING:
-    //case FF_LG_FTYPE_HIGH_RESOLUTION_SPRING:
     {
+        ret = 0;
     /*
         to->type = E_DATA_TYPE_SPRING;
             to->spring.saturation.left = ff_lg_u8_to_u16(FF_LG_SPRING_CLIP(force));
@@ -564,6 +579,7 @@ int ff_lg_convert_force(unsigned char caps, const unsigned char *data, unsigned 
         break;
     case FF_LG_FTYPE_HIGH_RESOLUTION_SPRING:
     {
+        //ret = 0;
     /*
         to->type = E_DATA_TYPE_SPRING;
             to->playing = 1;
@@ -578,6 +594,7 @@ int ff_lg_convert_force(unsigned char caps, const unsigned char *data, unsigned 
             to->spring.center = ff_lg_u16_to_s16((d1 + d2) / 2);
             to->spring.deadband = d2 - d1;
         */
+       #if 0
         uint16_t dd2 = ff_lg_get_spring_deadband(caps, FF_LG_HIGHRES_SPRING_D2(force), FF_LG_HIGHRES_SPRING_D2L(force));
         uint16_t dd1 = ff_lg_get_spring_deadband(caps, FF_LG_HIGHRES_SPRING_D1(force), FF_LG_HIGHRES_SPRING_D1L(force));
         uint16_t d1;
@@ -619,16 +636,18 @@ int ff_lg_convert_force(unsigned char caps, const unsigned char *data, unsigned 
                 k2 = convert_coef_lr2lr(k2);
             }
         }
-        command->parameters[0] = d1 >> 3;
-        command->parameters[1] = d2 >> 3;
-        command->parameters[2] = (k2 << 4) | k1;
-        command->parameters[3] = ((d2 & 0x0f) << 5) | (s2 << 4) | ((d1 & 0x07) << 1) | s1;
-        command->parameters[4] = clip;
+        #endif
+        command->parameters[0] = FF_LG_HIGHRES_SPRING_D1(force);//d1 >> 3;
+        command->parameters[1] = FF_LG_HIGHRES_SPRING_D2(force);//d2 >> 3;
+        command->parameters[2] = force->parameters[2];//(k2 << 4) | k1;
+        command->parameters[3] = force->parameters[3];//((d2 & 0x0f) << 5) | (s2 << 4) | ((d1 & 0x07) << 1) | s1;
+        command->parameters[4] = force->parameters[4];//clip;
+        *cmd |= 0x10;
     }
         break;
     case FF_LG_FTYPE_DAMPER:
-    //case FF_LG_FTYPE_HIGH_RESOLUTION_DAMPER:
     {
+        ret = 0;
     /*
         to->type = E_DATA_TYPE_DAMPER;
             to->damper.saturation.left = USHRT_MAX;
@@ -680,6 +699,7 @@ int ff_lg_convert_force(unsigned char caps, const unsigned char *data, unsigned 
     break;
     case FF_LG_FTYPE_HIGH_RESOLUTION_DAMPER:
     {
+        //ret = 0;
     /*
         to->type = E_DATA_TYPE_DAMPER;
             to->damper.saturation.left = ff_lg_get_damper_clip(caps, FF_LG_HIGHRES_DAMPER_CLIP(force));
@@ -691,6 +711,7 @@ int ff_lg_convert_force(unsigned char caps, const unsigned char *data, unsigned 
             to->damper.center = 0;
             to->damper.deadband = 0;
                 */
+#if 0
         uint8_t k1;
         uint8_t s1 = 0x00;
         uint8_t k2;
@@ -707,6 +728,7 @@ int ff_lg_convert_force(unsigned char caps, const unsigned char *data, unsigned 
             right *= -1;
         }
         if (caps & FF_LG_CAPS_HIGH_RES_COEF) {
+            *cmd |= 0x20;
             command->force_type = FF_LG_FTYPE_HIGH_RESOLUTION_DAMPER;
             k1 = left * 0x0f / SHRT_MAX;
             k2 = right * 0x0f / SHRT_MAX;
@@ -724,17 +746,22 @@ int ff_lg_convert_force(unsigned char caps, const unsigned char *data, unsigned 
                 k2 = convert_coef_lr2lr(k2);
             }
         }
-        command->parameters[0] = k1;
-        command->parameters[1] = s1;
-        command->parameters[2] = k2;
-        command->parameters[3] = s2;
-        command->parameters[4] = clip;
+#endif
+        //clip = (FF_LG_HIGHRES_DAMPER_CLIP(force) & 0xf0) >> 4;
+        uint8_t clip = get_map (FF_LG_HIGHRES_DAMPER_CLIP(force), 0x00, 0xff, 0x00, 0x05);
+        //clip = (FF_LG_HIGHRES_DAMPER_CLIP(force) & 0x0f);
+        command->parameters[0] = clip;//k1;
+        command->parameters[1] = 0x00;//s1;
+        command->parameters[2] = clip;//k2;
+        command->parameters[3] = 0x00;//s2;
+        command->parameters[4] = 0xFF;//clip;
     }
         break;
     default:
         //TODO MLA: other force types
         {
             printf ("\n#w:unsupported force type: %s", ff_lg_get_ftype_name(force->force_type));
+            ret = 0;
         }
         break;
     }
@@ -847,11 +874,13 @@ int ff_lg_convert_extended(const unsigned char *data, unsigned char *ffbot)
         dump(data + 2, FF_LG_OUTPUT_REPORT_SIZE - 2);
         break;
     }
-    return FF_LG_OUTPUT_REPORT_SIZE;
+    return 0;//FF_LG_OUTPUT_REPORT_SIZE;
 }
 
+static char cmd_stop[] = { 0x01, 0x08, 0x80, 0x00, 0x00, 0x00, 0x00 };
 int ff_lg_convert(const unsigned char *data, unsigned char *ffbot)
 {
+    int ret = FF_LG_OUTPUT_REPORT_SIZE;
     static unsigned char caps = FF_LG_CAPS_HIGH_RES_COEF | FF_LG_CAPS_HIGH_RES_DEADBAND | FF_LG_CAPS_LEDS | FF_LG_CAPS_RANGE;
     uint8_t * ocmd = ffbot;
     s_ff_lg_command * command = (s_ff_lg_command *)(ffbot + 1);
@@ -876,21 +905,28 @@ int ff_lg_convert(const unsigned char *data, unsigned char *ffbot)
                 if (cmd == FF_LG_CMD_STOP)
                 {
                     //memset(forces[i].parameters + 1, 0x00, sizeof(forces[i].parameters) - 1); // keep force type
-                    memcpy (ffbot, data, FF_LG_OUTPUT_REPORT_SIZE);
+                    memcpy (ffbot, cmd_stop, FF_LG_OUTPUT_REPORT_SIZE);
                 }
                 else
                 {
-                    ff_lg_convert_force (caps, data, ffbot);
+                    ret = ff_lg_convert_force (caps, data, ffbot);
                     //memcpy(forces[i].parameters, data + 1, sizeof(forces[i].parameters));
                 }
                 //s_cmd cmd = { forces[i].mask, 0x00 };
                 //ff_lg_fifo_push(state->fifo, cmd, 1);
             }
             break;
+            case FF_LG_CMD_DEFAULT_SPRING_ON:
+            case FF_LG_CMD_DEFAULT_SPRING_OFF:
+            {
+                memcpy (ffbot, data, FF_LG_OUTPUT_REPORT_SIZE);
+            }
+            break;
             default:
             {
                 printf("\n#w:skipping unsupported command %s", ff_lg_get_cmd_name(cmd));
                 memcpy (ffbot, data, FF_LG_OUTPUT_REPORT_SIZE);
+                ret = 0;
             }
             break;
         }
@@ -901,7 +937,7 @@ int ff_lg_convert(const unsigned char *data, unsigned char *ffbot)
         switch(data[1])
         {
             case FF_LG_EXT_CMD_WHEEL_RANGE_200_DEGREES:
-                range = 200;
+                range = 380;
                 break;
             case FF_LG_EXT_CMD_WHEEL_RANGE_900_DEGREES:
                 range = 900;
@@ -918,7 +954,7 @@ int ff_lg_convert(const unsigned char *data, unsigned char *ffbot)
             command->parameters[0] = range & 0xFF;
             command->parameters[1] = range >> 8;
             //memcpy (ffbot, data, FF_LG_OUTPUT_REPORT_SIZE);
-            return FF_LG_OUTPUT_REPORT_SIZE;
+            //ret = FF_LG_OUTPUT_REPORT_SIZE;
         }
 
         switch(data[1])
@@ -930,6 +966,7 @@ int ff_lg_convert(const unsigned char *data, unsigned char *ffbot)
             case FF_LG_EXT_CMD_CHANGE_MODE_G25_NO_DETACH:
             {
                 printf("\n#w:skipping unsupported change wheel mode commands 0x%02x", data[1]);
+                ret = 0;
             }
             break;
             default:
@@ -938,5 +975,5 @@ int ff_lg_convert(const unsigned char *data, unsigned char *ffbot)
         //return ff_lg_convert_extended (data, ffbot);
     }
     //
-    return FF_LG_OUTPUT_REPORT_SIZE;
+    return ret;
 }

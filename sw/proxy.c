@@ -1168,7 +1168,7 @@ endpoint: IN INTERRUPT 4
 #define FFB_ps2_dfp_out_ep 0x03
 int ffb_ps2_dfp_convert (unsigned char *ffbin, unsigned char *ffbot, int inlen)
 {
-  int i;
+  int i, ret = 0;//FFB_PS2_DFP_REPORT_LEN;
   if (1)
   {
     printf ("\n#ffb DFP in %d bytes: ", inlen);
@@ -1194,17 +1194,17 @@ int ffb_ps2_dfp_convert (unsigned char *ffbin, unsigned char *ffbot, int inlen)
   //convert report from old to new
   memcpy (ffbot + 1, ffbin, inlen);
   if (1)
-    ff_lg_convert (ffbin, ffbot + 1);
+    ret = ff_lg_convert (ffbin, ffbot + 1);
   if (1)
   {
-    printf ("\n#ffb out %d bytes: ", FFB_PS2_DFP_REPORT_LEN);
+    printf ("\n#%s out %d bytes: ", ret?"ffb":"dbg", FFB_PS2_DFP_REPORT_LEN);
     for (i = 0; i < FFB_PS2_DFP_REPORT_LEN; i++)
       printf ("%02X ", ffbot[i]);
     //ff_lg_decode_command (ffbot + 2);
     fflush (stdout);
   }
   //
-  return FFB_PS2_DFP_REPORT_LEN;
+  return ret;
 }
 
 //--PS3: Logitech DFGT/G25
@@ -1421,7 +1421,7 @@ int whl_ps3_dfgt_convert (char *rep, int rl)
 #define FFB_ps3_dfgt_out_ep 0x03
 int ffb_ps3_dfgt_convert (unsigned char *ffbin, unsigned char *ffbot, int inlen)
 {
-  int i;
+  int i, ret = 0;
   if (1)
   {
     printf ("\n#ffb DFGT in %d bytes: ", inlen);
@@ -1441,18 +1441,20 @@ int ffb_ps3_dfgt_convert (unsigned char *ffbin, unsigned char *ffbot, int inlen)
   */
   memset (ffbot, 0x00, FFB_PS3_DFGT_REPORT_LEN); //out/ffb report has 33 bytes so we pad with 0
   ffbot[0] = 0x30;
+  //convert report from old to new
   memcpy (ffbot + 1, ffbin, inlen);
-  //
-  if (0)
+  if (1)
+    ret = ff_lg_convert (ffbin, ffbot + 1);
+  if (1)
   {
-    printf ("\n#ffb out %d bytes: ", FFB_PS3_DFGT_REPORT_LEN);
-    for (i = 0; i < FFB_PS3_DFGT_REPORT_LEN; i++)
+    printf ("\n#%s out %d bytes: ", ret?"ffb":"dbg", FFB_PS2_DFP_REPORT_LEN);
+    for (i = 0; i < FFB_PS2_DFP_REPORT_LEN; i++)
       printf ("%02X ", ffbot[i]);
     //ff_lg_decode_command (ffbot + 2);
     fflush (stdout);
   }
   //
-  return FFB_PS3_DFGT_REPORT_LEN;
+  return ret;
 }
 
 //--PS3: Logitech G27
